@@ -1612,141 +1612,155 @@ int main(int argc, char *argv[]) {
         static struct option long_options[] =
         {
         /* These options set a flag. */
-        {"dry-run", no_argument,     &dry_run, 1},
-        {"fake-requires-offloading", no_argument, &fake_offloading, 1},
-        {"fake-no-requires-offloading", no_argument, &fake_offloading, 0},
+        {"backup-log", no_argument, &backup_log, 1},
+        {"dry-run", no_argument, &dry_run, 1},
         {"fake-module-is-available", no_argument, &fake_module_available, 1},
         {"fake-module-is-not-available", no_argument, &fake_module_available, 0},
-        {"backup-log", no_argument, &backup_log, 1},
         {"fake-module-is-versioned", no_argument, &fake_module_versioned, 1},
+        {"fake-no-requires-offloading", no_argument, &fake_offloading, 0},
+        {"fake-requires-offloading", no_argument, &fake_offloading, 1},
         /* These options don't set a flag.
           We distinguish them by their indices. */
-        {"log",  required_argument, 0, 'l'},
-        {"fake-lspci",  required_argument, 0, 'f'},
+        {"xorg-conf-d-path", required_argument, 0, 'a'},
         {"last-boot-file", required_argument, 0, 'b'},
-        {"new-boot-file", required_argument, 0, 'n'},
-        {"fake-modules-path", required_argument, 0, 'm'},
-        {"gpu-detection-path", required_argument, 0, 's'},
-        {"prime-settings", required_argument, 0, 'z'},
+        {"fake-lspci", required_argument, 0, 'f'},
         {"dmi-product-version-path", required_argument, 0, 'h'},
         {"dmi-product-name-path", required_argument, 0, 'i'},
         {"nvidia-driver-version-path", required_argument, 0, 'j'},
         {"modprobe-d-path", required_argument, 0, 'k'},
-        {"xorg-conf-d-path", required_argument, 0, 'a'},
+        {"log", required_argument, 0, 'l'},
+        {"fake-modules-path", required_argument, 0, 'm'},
+        {"new-boot-file", required_argument, 0, 'n'},
+        {"gpu-detection-path", required_argument, 0, 's'},
         {"amdgpu-pro-px-file", required_argument, 0, 'w'},
+        {"prime-settings", required_argument, 0, 'z'},
         {0, 0, 0, 0}
         };
         /* getopt_long stores the option index here. */
         int option_index = 0;
 
-        opt = getopt_long (argc, argv, "a:b:c:d:f:g:h:i:j:k:l:m:n:o:p:q:r:s:t:x:y:z:w:",
+        opt = getopt_long (argc, argv, "a:b:f:h:i:j:k:l:m:n:s:w:z:",
                         long_options, &option_index);
 
         /* Detect the end of the options. */
         if (opt == -1)
-         break;
+            break;
 
         switch (opt) {
-            case 0:
-                if (long_options[option_index].flag != 0)
-                    break;
-                printf("option %s", long_options[option_index].name);
-                if (optarg)
-                    printf(" with arg %s", optarg);
-                printf("\n");
+        case 0:
+            if (long_options[option_index].flag != 0)
                 break;
-            case 'a':
-                xorg_conf_d_path = strdup(optarg);
-                if (!xorg_conf_d_path)
-                    abort();
-                break;
-            case 'l':
-                /* printf("option -l with value '%s'\n", optarg); */
-                log_file = malloc(strlen(optarg) + 1);
-                if (log_file)
-                    strcpy(log_file, optarg);
-                else
-                    abort();
-                break;
-            case 'b':
-                /* printf("option -b with value '%s'\n", optarg); */
-                last_boot_file = malloc(strlen(optarg) + 1);
-                if (last_boot_file)
-                    strcpy(last_boot_file, optarg);
-                else
-                    abort();
-                break;
-            case 'n':
-                /* printf("option -n with value '%s'\n", optarg); */
-                new_boot_file = malloc(strlen(optarg) + 1);
-                if (new_boot_file)
-                    strcpy(new_boot_file, optarg);
-                else
-                    abort();
-                break;
-            case 'f':
-                /* printf("option -f with value '%s'\n", optarg); */
-                fake_lspci_file = malloc(strlen(optarg) + 1);
-                if (fake_lspci_file)
-                    strcpy(fake_lspci_file, optarg);
-                else
-                    abort();
-                break;
-            case 'm':
-                /* printf("option -m with value '%s'\n", optarg); */
-                fake_modules_path = malloc(strlen(optarg) + 1);
-                if (fake_modules_path)
-                    strcpy(fake_modules_path, optarg);
-                else
-                    abort();
-                break;
-            case 's':
-                /* printf("option -p with value '%s'\n", optarg); */
-                gpu_detection_path = malloc(strlen(optarg) + 1);
-                if (gpu_detection_path)
-                    strcpy(gpu_detection_path, optarg);
-                else
-                    abort();
-                break;
-            case 'z':
-                /* printf("option -p with value '%s'\n", optarg); */
-                prime_settings = strdup(optarg);
-                if (!prime_settings)
-                    abort();
-                break;
-            case 'h':
-                /* printf("option -p with value '%s'\n", optarg); */
-                dmi_product_version_path = strdup(optarg);
-                if (!dmi_product_version_path)
-                    abort();
-                break;
-            case 'i':
-                /* printf("option -p with value '%s'\n", optarg); */
-                dmi_product_name_path = strdup(optarg);
-                if (!dmi_product_name_path)
-                    abort();
-                break;
-            case 'j':
-                nvidia_driver_version_path = strdup(optarg);
-                if (!nvidia_driver_version_path)
-                    abort();
-                break;
-            case 'k':
-                modprobe_d_path = strdup(optarg);
-                if (!modprobe_d_path)
-                    abort();
-                break;
-            case 'w':
-                amdgpu_pro_px_file = strdup(optarg);
-                if (!amdgpu_pro_px_file)
-                    abort();
-                break;
-            case '?':
-                /* getopt_long already printed an error message. */
-                exit(1);
+            printf("option %s", long_options[option_index].name);
+            if (optarg)
+                printf(" with arg %s", optarg);
+            printf("\n");
+            break;
 
-            default:
+        case 'a':
+            xorg_conf_d_path = strdup(optarg);
+            if (!xorg_conf_d_path)
                 abort();
+            break;
+
+        case 'b':
+            /* printf("option -b with value '%s'\n", optarg); */
+            last_boot_file = malloc(strlen(optarg) + 1);
+            if (last_boot_file)
+                strcpy(last_boot_file, optarg);
+            else
+                abort();
+            break;
+
+        case 'f':
+            /* printf("option -f with value '%s'\n", optarg); */
+            fake_lspci_file = malloc(strlen(optarg) + 1);
+            if (fake_lspci_file)
+                strcpy(fake_lspci_file, optarg);
+            else
+                abort();
+            break;
+
+        case 'h':
+            /* printf("option -p with value '%s'\n", optarg); */
+            dmi_product_version_path = strdup(optarg);
+            if (!dmi_product_version_path)
+                abort();
+            break;
+
+        case 'i':
+            /* printf("option -p with value '%s'\n", optarg); */
+            dmi_product_name_path = strdup(optarg);
+            if (!dmi_product_name_path)
+                abort();
+            break;
+
+        case 'j':
+            nvidia_driver_version_path = strdup(optarg);
+            if (!nvidia_driver_version_path)
+                abort();
+            break;
+
+        case 'k':
+            modprobe_d_path = strdup(optarg);
+            if (!modprobe_d_path)
+                abort();
+            break;
+
+        case 'l':
+            /* printf("option -l with value '%s'\n", optarg); */
+            log_file = malloc(strlen(optarg) + 1);
+            if (log_file)
+                strcpy(log_file, optarg);
+            else
+                abort();
+            break;
+
+        case 'm':
+            /* printf("option -m with value '%s'\n", optarg); */
+            fake_modules_path = malloc(strlen(optarg) + 1);
+            if (fake_modules_path)
+                strcpy(fake_modules_path, optarg);
+            else
+                abort();
+            break;
+
+        case 'n':
+            /* printf("option -n with value '%s'\n", optarg); */
+            new_boot_file = malloc(strlen(optarg) + 1);
+            if (new_boot_file)
+                strcpy(new_boot_file, optarg);
+            else
+                abort();
+            break;
+
+        case 's':
+            /* printf("option -p with value '%s'\n", optarg); */
+            gpu_detection_path = malloc(strlen(optarg) + 1);
+            if (gpu_detection_path)
+                strcpy(gpu_detection_path, optarg);
+            else
+                abort();
+            break;
+
+        case 'w':
+            amdgpu_pro_px_file = strdup(optarg);
+            if (!amdgpu_pro_px_file)
+                abort();
+            break;
+
+        case 'z':
+            /* printf("option -p with value '%s'\n", optarg); */
+            prime_settings = strdup(optarg);
+            if (!prime_settings)
+                abort();
+            break;
+
+        case '?':
+            /* getopt_long already printed an error message. */
+            exit(1);
+
+        default:
+            abort();
         }
 
     }
