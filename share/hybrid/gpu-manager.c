@@ -125,7 +125,6 @@ static char *amdgpu_pro_px_file = NULL;
 static char *modprobe_d_path = NULL;
 static char *xorg_conf_d_path = NULL;
 static prime_intel_drv prime_intel_driver = SNA;
-static prime_mode_settings prime_mode = OFF;
 
 static struct pci_slot_match match = {
     PCI_MATCH_ANY, PCI_MATCH_ANY, PCI_MATCH_ANY, PCI_MATCH_ANY, 0
@@ -458,31 +457,35 @@ static prime_intel_drv get_prime_intel_driver() {
 
 
 /* Get prime action, which can be "on", "off", or "on-demand" */
-static void get_prime_action() {
+static prime_mode_settings get_prime_action(void)
+{
     char line[100];
     _cleanup_fclose_ FILE *file = NULL;
+    prime_mode_settings mode = OFF;
 
     file = fopen(prime_settings, "r");
 
     if (!file) {
         fprintf(log_handle, "Error: can't open %s\n", prime_settings);
-        prime_mode = OFF;
+        return OFF;
     }
 
     while (fgets(line, sizeof(line), file)) {
         if (istrstr(line, "on-demand") != NULL) {
-            prime_mode = ONDEMAND;
+            mode = ONDEMAND;
             break;
         }
         else if (istrstr(line, "on") != NULL) {
-            prime_mode = ON;
+            mode = ON;
             break;
         }
         else {
-            prime_mode = OFF;
+            mode = OFF;
             break;
         }
     }
+
+    return mode;
 }
 
 static void get_boot_vga(struct device **devices,
@@ -1508,6 +1511,7 @@ static bool kill_main_display_session (void) {
 
 static bool enable_prime(const char *prime_settings, const struct device *device)
 {
+    prime_mode_settings prime_mode = OFF;
     bool status = false;
     int tries = 0;
     /* Check if prime_settings is available
@@ -1525,7 +1529,7 @@ static bool enable_prime(const char *prime_settings, const struct device *device
         }
     }
 
-    get_prime_action();
+    prime_mode = get_prime_action();
     if (prime_mode == ON) {
         /* Create an OutputClass just for PRIME, to override
          * the default NVIDIA settings
