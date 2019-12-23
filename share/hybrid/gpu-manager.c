@@ -488,18 +488,15 @@ static prime_mode_settings get_prime_action(void)
     return mode;
 }
 
-static void get_boot_vga(struct device **devices,
-                        int cards_number,
-                        unsigned int *vendor_id,
-                        unsigned int *device_id) {
-    int i;
-    for(i = 0; i < cards_number; i++) {
+static struct device *get_boot_vga(struct device **devices, int cards_number)
+{
+    for (int i = 0; i < cards_number; i++) {
         if (devices[i]->boot_vga) {
-            *vendor_id = devices[i]->vendor_id;
-            *device_id = devices[i]->device_id;
-            break;
+            return devices[i];
         }
     }
+
+    return NULL;
 }
 
 
@@ -1614,8 +1611,7 @@ int main(int argc, char *argv[]) {
     int offloading = false;
     int status = 0;
 
-    /* Vendor and device id (boot vga) */
-    unsigned int boot_vga_vendor_id = 0, boot_vga_device_id = 0;
+    struct device *boot_device = NULL;
 
     /* The current number of cards */
     int cards_n = 0;
@@ -2092,15 +2088,17 @@ int main(int argc, char *argv[]) {
     if (has_changed)
         fprintf(log_handle, "System configuration has changed\n");
 
+    /* Get data about the boot_vga card */
+    boot_device = get_boot_vga(current_devices, cards_n);
+    if (!boot_device) {
+        fprintf(log_handle, "No boot display controller detected\n");
+        goto end;
+    }
+
     if (cards_n == 1) {
         fprintf(log_handle, "Single card detected\n");
 
-        /* Get data about the boot_vga card */
-        get_boot_vga(current_devices, cards_n,
-                     &boot_vga_vendor_id,
-                     &boot_vga_device_id);
-
-        if (boot_vga_vendor_id == INTEL) {
+        if (boot_device->vendor_id == INTEL) {
             if (offloading && nvidia_unloaded) {
                 /* NVIDIA PRIME */
                 fprintf(log_handle, "PRIME detected\n");
@@ -2125,7 +2123,7 @@ int main(int argc, char *argv[]) {
                 fprintf(log_handle, "Nothing to do\n");
                 }
             }
-        else if (boot_vga_vendor_id == AMD) {
+        else if (boot_device->vendor_id == AMD) {
             if (has_changed && amdgpu_loaded && amdgpu_is_pro && amdgpu_pro_px_installed) {
                 /* If amdgpu-pro-px exists, we can assume it's a pxpress system. But now the
                  * system has one card only, user probably disabled Switchable Graphics in
@@ -2139,24 +2137,19 @@ int main(int argc, char *argv[]) {
                 fprintf(log_handle, "Nothing to do\n");
             }
         }
-        else if (boot_vga_vendor_id == NVIDIA) {
+        else if (boot_device->vendor_id == NVIDIA) {
             if (remove_offload_serverlayout() == -ENOENT) {
                 fprintf(log_handle, "Nothing to do\n");
             }
         }
     }
     else if (cards_n > 1) {
-        /* Get data about the boot_vga card */
-        get_boot_vga(current_devices, cards_n,
-                     &boot_vga_vendor_id,
-                     &boot_vga_device_id);
-
         /* Get data about the first discrete card */
         get_first_discrete(current_devices, cards_n,
                            &discrete_device);
 
         /* Intel + another GPU */
-        if (boot_vga_vendor_id == INTEL) {
+        if (boot_device->vendor_id == INTEL) {
             fprintf(log_handle, "Intel IGP detected\n");
             /* AMDGPU-Pro Switchable */
             if (has_changed && amdgpu_loaded && amdgpu_is_pro && amdgpu_pro_px_installed) {
