@@ -73,12 +73,6 @@ static inline void pclosep(FILE **);
 #define _cleanup_fclose_ __attribute__((cleanup(fclosep)))
 #define _cleanup_pclose_ __attribute__((cleanup(pclosep)))
 
-#define PCI_CLASS_DISPLAY               0x03
-
-#define PCIINFOCLASSES(c) \
-    ( (((c) & 0x00ff0000) \
-     == (PCI_CLASS_DISPLAY << 16)) )
-
 #define LAST_BOOT "/var/lib/ubuntu-drivers-common/last_gfx_boot"
 #define OFFLOADING_CONF "/var/lib/ubuntu-drivers-common/requires_offloading"
 #define KERN_PARAM "nogpumanager"
@@ -1537,10 +1531,138 @@ unload_again:
     return true;
 }
 
+static void free_devices(struct device **devices)
+{
+    for (int i = 0; i < MAX_CARDS_N; i++) {
+        if (devices[i]) {
+            free(devices[i]);
+            devices[i] = NULL;
+        }
+    }
+}
 
-int main(int argc, char *argv[]) {
+#define PCI_CLASS_DISPLAY       0x03
 
-    int opt, i;
+static inline bool is_display_controller(const struct pci_device *pci)
+{
+    return ((pci->device_class >> 16) & 0xFF) == PCI_CLASS_DISPLAY;
+}
+
+static int get_current_devices(struct device **devices, int *cards_n)
+{
+    struct pci_device *info;
+    struct pci_device_iterator *iter;
+    int ret;
+    int nr_cards = 0;
+    bool has_amd = false;
+    bool has_intel = false;
+    bool has_nvidia = false;
+
+    /* Get the current system data */
+    ret = pci_system_init();
+    if (ret != 0)
+        return -ret;
+
+    const struct pci_slot_match match = {
+        PCI_MATCH_ANY,
+        PCI_MATCH_ANY,
+        PCI_MATCH_ANY,
+        PCI_MATCH_ANY,
+        0,
+    };
+
+    iter = pci_slot_match_iterator_create(&match);
+    if (!iter) {
+        ret = -1;
+        goto out;
+    }
+
+    int amdgpu_has_outputs = has_driver_connected_outputs("amdgpu");
+    int radeon_has_outputs = has_driver_connected_outputs("radeon");
+    int nouveau_has_outputs = has_driver_connected_outputs("nouveau");
+    int intel_has_outputs = has_driver_connected_outputs("i915");
+
+    while ((info = pci_device_next(iter)) != NULL) {
+        if (is_display_controller(info)) {
+            fprintf(log_handle, "Device ID: 0x%04X\n", info->device_id);
+            fprintf(log_handle, "  Vendor ID: 0x%04X\n", info->vendor_id);
+            fprintf(log_handle, "  Bus ID: \"%04X:%02X:%02X.%02X\"\n", info->bus, info->domain, info->dev, info->func);
+            fprintf(log_handle, "  Boot VGA: %s\n", pci_device_is_boot_vga(info) ? "yes" : "no");
+
+            if (!is_device_bound_to_driver(info)) {
+                fprintf(log_handle, "The device is not bound to any driver.\n");
+            }
+
+            if (is_device_pci_passthrough(info)) {
+                fprintf(log_handle, "The device is a pci passthrough. Skipping...\n");
+                continue;
+            }
+
+            /* We don't support more than MAX_CARDS_N */
+            if (nr_cards >= MAX_CARDS_N) {
+                fprintf(log_handle, "Warning: too many devices. "
+                                    "Max supported %d. Ignoring the rest.\n",
+                                    MAX_CARDS_N);
+                break;
+            }
+
+            struct device *dev = malloc(sizeof(*dev));
+            if (!dev) {
+                ret = -ENOMEM;
+                goto out;
+            }
+
+            dev->boot_vga = pci_device_is_boot_vga(info);
+            dev->vendor_id = info->vendor_id;
+            dev->device_id = info->device_id;
+            dev->domain = info->domain;
+            dev->bus = info->bus;
+            dev->dev = info->dev;
+            dev->func = info->func;
+
+            if (info->vendor_id == AMD) {
+                int has_outputs = (radeon_has_outputs != -1) ? radeon_has_outputs : amdgpu_has_outputs;
+                dev->has_connected_outputs = has_outputs;
+                has_amd = true;
+            }
+            else if (info->vendor_id == INTEL) {
+                dev->has_connected_outputs = intel_has_outputs;
+                has_intel = true;
+            }
+            else if (info->vendor_id == NVIDIA) {
+                dev->has_connected_outputs = nouveau_has_outputs;
+                has_nvidia = true;
+            }
+            else {
+                dev->has_connected_outputs = -1;
+            }
+
+            devices[nr_cards] = dev;
+            nr_cards += 1;
+        }
+    }
+
+    fprintf(log_handle, "Cards detected: %d\n", nr_cards);
+    fprintf(log_handle, "  AMD: %s\n", (has_amd ? "yes" : "no"));
+    fprintf(log_handle, "  Intel: %s\n", (has_intel ? "yes" : "no"));
+    fprintf(log_handle, "  NVIDIA: %s\n", (has_nvidia ? "yes" : "no"));
+
+out:
+    if (ret != 0) {
+        free_devices(devices);
+        nr_cards = 0;
+    }
+
+    free(iter);
+    pci_system_cleanup();
+
+    *cards_n = nr_cards;
+    return ret;
+}
+
+int main(int argc, char *argv[])
+{
+    int opt;
     char *fake_lspci_file = NULL;
     char *new_boot_file = NULL;
     char *prime_settings = NULL;
@@ -1550,7 +1672,6 @@ int main(int argc, char *argv[]) {
     static int fake_module_versioned = 0;
     static int backup_log = 0;
 
-    bool has_intel = false, has_amd = false, has_nvidia = false;
     bool has_changed = false;
     bool nvidia_loaded = false,
          intel_loaded = false, radeon_loaded = false,
@@ -1575,11 +1696,6 @@ int main(int argc, char *argv[]) {
 
     /* The number of cards from last boot*/
     int last_cards_n = 0;
-
-    /* Variables for pciaccess */
-    int pci_init = -1;
-    struct pci_device_iterator *iter = NULL;
-    struct pci_device *info = NULL;
 
     /* Store the devices here */
     struct device *current_devices[MAX_CARDS_N];
@@ -1916,23 +2032,13 @@ int main(int argc, char *argv[]) {
 
     if (fake_lspci_file) {
         /* Get the current system data from a file */
-        status = read_data_from_file(current_devices, &cards_n,
-                                     fake_lspci_file);
+        status = read_data_from_file(current_devices, &cards_n, fake_lspci_file);
         if (!status) {
             fprintf(log_handle, "Error: can't read %s\n", fake_lspci_file);
             goto end;
         }
         /* Set data in the devices structs */
-        for(i = 0; i < cards_n; i++) {
-            if (current_devices[i]->vendor_id == NVIDIA) {
-                has_nvidia = true;
-            }
-            else if (current_devices[i]->vendor_id == AMD) {
-                has_amd = true;
-            }
-            else if (current_devices[i]->vendor_id == INTEL) {
-                has_intel = true;
-            }
+        for (int i = 0; i < cards_n; i++) {
             /* Set unavailable fake outputs */
             current_devices[i]->has_connected_outputs = -1;
         }
@@ -1940,85 +2046,8 @@ int main(int argc, char *argv[]) {
         offloading = fake_offloading;
     }
     else {
-        int amdgpu_has_outputs = has_driver_connected_outputs("amdgpu");
-        int radeon_has_outputs = has_driver_connected_outputs("radeon");
-        int nouveau_has_outputs = has_driver_connected_outputs("nouveau");
-        int intel_has_outputs = has_driver_connected_outputs("i915");
-
-        /* Get the current system data */
-        pci_init = pci_system_init();
-        if (pci_init != 0)
+        if (get_current_devices(current_devices, &cards_n) != 0)
             goto end;
-
-        const struct pci_slot_match match = {
-            PCI_MATCH_ANY, PCI_MATCH_ANY, PCI_MATCH_ANY, PCI_MATCH_ANY, 0
-        };
-
-        iter = pci_slot_match_iterator_create(&match);
-        if (!iter)
-            goto end;
-
-        while ((info = pci_device_next(iter)) != NULL) {
-            if (PCIINFOCLASSES(info->device_class)) {
-                fprintf(log_handle, "Vendor/Device Id: %x:%x\n", info->vendor_id, info->device_id);
-                fprintf(log_handle, "BusID \"PCI:%d@%d:%d:%d\"\n",
-                        (int)info->bus, (int)info->domain, (int)info->dev, (int)info->func);
-                fprintf(log_handle, "Is boot vga? %s\n", (pci_device_is_boot_vga(info) ? "yes" : "no"));
-
-                if (!is_device_bound_to_driver(info)) {
-                    fprintf(log_handle, "The device is not bound to any driver.\n");
-                }
-
-                if (is_device_pci_passthrough(info)) {
-                    fprintf(log_handle, "The device is a pci passthrough. Skipping...\n");
-                    continue;
-                }
-
-                if (info->vendor_id == AMD) {
-                    int has_outputs = (radeon_has_outputs != -1) ? radeon_has_outputs : amdgpu_has_outputs;
-                    current_devices[cards_n]->has_connected_outputs = has_outputs;
-                    has_amd = true;
-                }
-                else if (info->vendor_id == INTEL) {
-                    current_devices[cards_n]->has_connected_outputs = intel_has_outputs;
-                    has_intel = true;
-                }
-                else if (info->vendor_id == NVIDIA) {
-                    current_devices[cards_n]->has_connected_outputs = nouveau_has_outputs;
-                    has_nvidia = true;
-                }
-                else {
-                    current_devices[cards_n]->has_connected_outputs = -1;
-                }
-
-                /* We don't support more than MAX_CARDS_N */
-                if (cards_n < MAX_CARDS_N) {
-                    current_devices[cards_n] = malloc(sizeof(struct device));
-                    if (!current_devices[cards_n])
-                        goto end;
-                    current_devices[cards_n]->boot_vga = pci_device_is_boot_vga(info);
-                    current_devices[cards_n]->vendor_id = info->vendor_id;
-                    current_devices[cards_n]->device_id = info->device_id;
-                    current_devices[cards_n]->domain = info->domain;
-                    current_devices[cards_n]->bus = info->bus;
-                    current_devices[cards_n]->dev = info->dev;
-                    current_devices[cards_n]->func = info->func;
-                }
-                else {
-                    fprintf(log_handle, "Warning: too many devices %d. "
-                                        "Max supported %d. Ignoring the rest.\n",
-                                        cards_n, MAX_CARDS_N);
-                    break;
-                }
-                /*
-                else {
-                    fprintf(stderr, "No hybrid graphics cards detected\n");
-                    break;
-                }
-                */
-                cards_n++;
-            }
-        }
 
         /* See if it requires RandR offloading */
         offloading = requires_offloading(current_devices, cards_n);
@@ -2031,7 +2060,6 @@ int main(int argc, char *argv[]) {
      */
     if (!offloading && !dry_run)
         unlink(OFFLOADING_CONF);
-
 
     /* Read the data from last boot */
     status = read_data_from_file(old_devices, &last_cards_n,
@@ -2051,11 +2079,6 @@ int main(int argc, char *argv[]) {
         fprintf(log_handle, "Error: can't write to %s\n", last_boot_file);
         goto end;
     }
-
-    fprintf(log_handle, "Has amd? %s\n", (has_amd ? "yes" : "no"));
-    fprintf(log_handle, "Has intel? %s\n", (has_intel ? "yes" : "no"));
-    fprintf(log_handle, "Has nvidia? %s\n", (has_nvidia ? "yes" : "no"));
-    fprintf(log_handle, "How many cards? %d\n", cards_n);
 
     /* See if the system has changed */
     has_changed = has_system_changed(old_devices,
@@ -2175,12 +2198,6 @@ int main(int argc, char *argv[]) {
 
 
 end:
-    if (pci_init == 0)
-        pci_system_cleanup();
-
-    if (iter)
-        free(iter);
-
     if (log_file)
         free(log_file);
 
@@ -2217,14 +2234,8 @@ end:
     if (xorg_conf_d_path)
         free(xorg_conf_d_path);
 
-    /* Free the devices structs */
-    for(i = 0; i < cards_n; i++) {
-        free(current_devices[i]);
-    }
-
-    for(i = 0; i < last_cards_n; i++) {
-        free(old_devices[i]);
-    }
+    free_devices(current_devices);
+    free_devices(old_devices);
 
     /* Flush and close the log */
     if (log_handle != stdout) {
