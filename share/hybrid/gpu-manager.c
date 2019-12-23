@@ -42,25 +42,28 @@
  */
 
 #define _GNU_SOURCE
+
+#include <libkmod.h>
+#include <pciaccess.h>
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+
+#include <dirent.h>
+#include <fcntl.h>
+#include <getopt.h>
+#include <linux/limits.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/utsname.h>
+#include <time.h>
+
+#include <ctype.h>
+#include <errno.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <stdbool.h>
-#include <ctype.h>
-#include <pciaccess.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <dirent.h>
-#include <getopt.h>
-#include <time.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <linux/limits.h>
-#include <sys/utsname.h>
-#include <libkmod.h>
-#include "xf86drm.h"
-#include "xf86drmMode.h"
 
 static inline void freep(void *);
 static inline void fclosep(FILE **);
