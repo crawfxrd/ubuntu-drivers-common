@@ -995,29 +995,6 @@ static int has_driver_connected_outputs(const char *driver) {
 }
 
 
-/* Add information on connected outputs */
-static void add_connected_outputs_info(struct device **devices,
-                                       int cards_n) {
-    int i;
-    int amdgpu_has_outputs = has_driver_connected_outputs("amdgpu");
-    int radeon_has_outputs = has_driver_connected_outputs("radeon");
-    int nouveau_has_outputs = has_driver_connected_outputs("nouveau");
-    int intel_has_outputs = has_driver_connected_outputs("i915");
-
-    for(i = 0; i < cards_n; i++) {
-        if (devices[i]->vendor_id == INTEL)
-            devices[i]->has_connected_outputs = intel_has_outputs;
-        else if (devices[i]->vendor_id == AMD)
-            devices[i]->has_connected_outputs = ((radeon_has_outputs != -1) ? radeon_has_outputs
-                                                 : amdgpu_has_outputs);
-        else if (devices[i]->vendor_id == NVIDIA)
-            devices[i]->has_connected_outputs = nouveau_has_outputs;
-        else
-            devices[i]->has_connected_outputs = -1;
-    }
-}
-
-
 /* Check if any outputs are still connected to card0.
  *
  * By default we only check cards driver by i915.
@@ -1963,6 +1940,11 @@ int main(int argc, char *argv[]) {
         offloading = fake_offloading;
     }
     else {
+        int amdgpu_has_outputs = has_driver_connected_outputs("amdgpu");
+        int radeon_has_outputs = has_driver_connected_outputs("radeon");
+        int nouveau_has_outputs = has_driver_connected_outputs("nouveau");
+        int intel_has_outputs = has_driver_connected_outputs("i915");
+
         /* Get the current system data */
         pci_init = pci_system_init();
         if (pci_init != 0)
@@ -1992,15 +1974,21 @@ int main(int argc, char *argv[]) {
                     continue;
                 }
 
-                /* char *driver = NULL; */
-                if (info->vendor_id == NVIDIA) {
-                    has_nvidia = true;
+                if (info->vendor_id == AMD) {
+                    int has_outputs = (radeon_has_outputs != -1) ? radeon_has_outputs : amdgpu_has_outputs;
+                    current_devices[cards_n]->has_connected_outputs = has_outputs;
+                    has_amd = true;
                 }
                 else if (info->vendor_id == INTEL) {
+                    current_devices[cards_n]->has_connected_outputs = intel_has_outputs;
                     has_intel = true;
                 }
-                else if (info->vendor_id == AMD) {
-                    has_amd = true;
+                else if (info->vendor_id == NVIDIA) {
+                    current_devices[cards_n]->has_connected_outputs = nouveau_has_outputs;
+                    has_nvidia = true;
+                }
+                else {
+                    current_devices[cards_n]->has_connected_outputs = -1;
                 }
 
                 /* We don't support more than MAX_CARDS_N */
@@ -2031,8 +2019,6 @@ int main(int argc, char *argv[]) {
                 cards_n++;
             }
         }
-        /* Add information about connected outputs */
-        add_connected_outputs_info(current_devices, cards_n);
 
         /* See if it requires RandR offloading */
         offloading = requires_offloading(current_devices, cards_n);
