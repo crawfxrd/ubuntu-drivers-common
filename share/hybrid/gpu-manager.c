@@ -500,16 +500,15 @@ static struct device *get_boot_vga(struct device **devices, int cards_number)
 }
 
 
-static void get_first_discrete(struct device **devices,
-                               int cards_number,
-                               struct device *device) {
-    int i;
-    for(i = 0; i < cards_number; i++) {
+static struct device *get_first_discrete(struct device **devices, int cards_number)
+{
+    for (int i = 0; i < cards_number; i++) {
         if (!devices[i]->boot_vga) {
-            memcpy(device, devices[i], sizeof(struct device));
-            break;
+            return devices[i];
         }
     }
+
+    return NULL;
 }
 
 
@@ -1612,6 +1611,7 @@ int main(int argc, char *argv[]) {
     int status = 0;
 
     struct device *boot_device = NULL;
+    struct device *discrete_device = NULL;
 
     /* The current number of cards */
     int cards_n = 0;
@@ -1627,10 +1627,6 @@ int main(int argc, char *argv[]) {
     /* Store the devices here */
     struct device *current_devices[MAX_CARDS_N];
     struct device *old_devices[MAX_CARDS_N];
-
-    /* Device information (discrete) */
-    struct device discrete_device = { 0 };
-
 
     while (1) {
         static struct option long_options[] =
@@ -2108,11 +2104,12 @@ int main(int argc, char *argv[]) {
                                     &cards_n, add_gpu_from_file);
 
                 /* Get data about the first discrete card */
-                get_first_discrete(current_devices, cards_n,
-                                   &discrete_device);
+                discrete_device = get_first_discrete(current_devices, cards_n);
+                if (!discrete_device)
+                    goto end;
 
                 /* Try to enable prime */
-                if (enable_prime(prime_settings, &discrete_device)) {
+                if (enable_prime(prime_settings, discrete_device)) {
 
                     /* Write permanent settings about offloading */
                     set_offloading();
@@ -2145,8 +2142,9 @@ int main(int argc, char *argv[]) {
     }
     else if (cards_n > 1) {
         /* Get data about the first discrete card */
-        get_first_discrete(current_devices, cards_n,
-                           &discrete_device);
+        discrete_device = get_first_discrete(current_devices, cards_n);
+        if (!discrete_device)
+            goto end;
 
         /* Intel + another GPU */
         if (boot_device->vendor_id == INTEL) {
@@ -2166,7 +2164,7 @@ int main(int argc, char *argv[]) {
                 fprintf(log_handle, "Intel hybrid system\n");
 
                 /* Try to enable prime */
-                if (enable_prime(prime_settings, &discrete_device)) {
+                if (enable_prime(prime_settings, discrete_device)) {
 
                     /* Write permanent settings about offloading */
                     set_offloading();
@@ -2185,7 +2183,7 @@ int main(int argc, char *argv[]) {
             }
         }
         else {
-                fprintf(log_handle, "Unsupported discrete card vendor: %x\n", discrete_device.vendor_id);
+                fprintf(log_handle, "Unsupported discrete card vendor: %x\n", discrete_device->vendor_id);
                 fprintf(log_handle, "Nothing to do\n");
         }
     }
