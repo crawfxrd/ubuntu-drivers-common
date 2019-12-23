@@ -74,7 +74,6 @@ static inline void pclosep(FILE **);
 #define _cleanup_pclose_ __attribute__((cleanup(pclosep)))
 
 #define PCI_CLASS_DISPLAY               0x03
-#define PCI_CLASS_DISPLAY_OTHER         0x0380
 
 #define PCIINFOCLASSES(c) \
     ( (((c) & 0x00ff0000) \
@@ -82,7 +81,6 @@ static inline void pclosep(FILE **);
 
 #define LAST_BOOT "/var/lib/ubuntu-drivers-common/last_gfx_boot"
 #define OFFLOADING_CONF "/var/lib/ubuntu-drivers-common/requires_offloading"
-#define XORG_CONF "/etc/X11/xorg.conf"
 #define KERN_PARAM "nogpumanager"
 #define AMDGPU_PRO_PX  "/opt/amdgpu-pro/bin/amdgpu-pro-px"
 
@@ -117,7 +115,6 @@ static char *last_boot_file = NULL;
 static int dry_run = 0;
 static char *fake_modules_path = NULL;
 static char *gpu_detection_path = NULL;
-static char *prime_settings = NULL;
 static char *dmi_product_name_path = NULL;
 static char *dmi_product_version_path = NULL;
 static char *nvidia_driver_version_path = NULL;
@@ -125,10 +122,6 @@ static char *amdgpu_pro_px_file = NULL;
 static char *modprobe_d_path = NULL;
 static char *xorg_conf_d_path = NULL;
 static prime_intel_drv prime_intel_driver = SNA;
-
-static struct pci_slot_match match = {
-    PCI_MATCH_ANY, PCI_MATCH_ANY, PCI_MATCH_ANY, PCI_MATCH_ANY, 0
-};
 
 struct device {
     int boot_vga;
@@ -309,7 +302,7 @@ static bool unload_module(const char *module) {
 
 /* Get the first match from the output of a command */
 static char* get_output(const char *command, const char *pattern, const char *ignore) {
-    int len;
+    size_t len;
     char buffer[1035];
     char *output = NULL;
     _cleanup_pclose_ FILE *pfile = NULL;
@@ -457,16 +450,16 @@ static prime_intel_drv get_prime_intel_driver() {
 
 
 /* Get prime action, which can be "on", "off", or "on-demand" */
-static prime_mode_settings get_prime_action(void)
+static prime_mode_settings get_prime_action(const char *path)
 {
     char line[100];
     _cleanup_fclose_ FILE *file = NULL;
     prime_mode_settings mode = OFF;
 
-    file = fopen(prime_settings, "r");
+    file = fopen(path, "r");
 
     if (!file) {
-        fprintf(log_handle, "Error: can't open %s\n", prime_settings);
+        fprintf(log_handle, "Error: can't open %s\n", path);
         return OFF;
     }
 
@@ -705,7 +698,7 @@ static void add_gpu_from_file(char *filename, char *dirname, struct device **dev
 
 
 /* Look for clues of disabled cards in the directory */
-void find_disabled_cards(char *dir, struct device **devices,
+static void find_disabled_cards(char *dir, struct device **devices,
                          int *cards_n, void (*fcn)(char *, char *,
                          struct device **, int *))
 {
@@ -893,7 +886,7 @@ static bool is_connector_connected(const char *connector) {
 
 
 /* Count the number of outputs connected to the card */
-int count_connected_outputs(const char *device_name) {
+static int count_connected_outputs(const char *device_name) {
     char name[PATH_MAX];
     struct dirent *dp;
     DIR *dfd;
@@ -1087,16 +1080,14 @@ static bool move_log(void) {
 }
 
 
-static bool create_prime_settings(const char *prime_settings) {
+static bool create_prime_settings(const char *path) {
     _cleanup_fclose_ FILE *file = NULL;
 
-    fprintf(log_handle, "Trying to create new settings for prime. Path: %s\n",
-            prime_settings);
+    fprintf(log_handle, "Trying to create new settings for prime. Path: %s\n", path);
 
-    file = fopen(prime_settings, "w");
+    file = fopen(path, "w");
     if (file == NULL) {
-        fprintf(log_handle, "I couldn't open %s for writing.\n",
-                prime_settings);
+        fprintf(log_handle, "I couldn't open %s for writing.\n", path);
         return false;
     }
     /* Set prime to "on" */
@@ -1465,7 +1456,6 @@ static long get_gdm_session_pid(const char* display_server) {
 /* Kill the main display session created by Gdm 3 */
 static bool kill_main_display_session (void) {
     int i;
-    _cleanup_free_ char *final_pid = NULL;
     char command[100];
     char server[] = "Xwayland";
     long pid = -1;
@@ -1496,7 +1486,7 @@ static bool kill_main_display_session (void) {
 }
 
 
-static bool enable_prime(const char *prime_settings, const struct device *device)
+static bool enable_prime(const char *path, const struct device *device)
 {
     prime_mode_settings prime_mode = OFF;
     bool status = false;
@@ -1504,19 +1494,17 @@ static bool enable_prime(const char *prime_settings, const struct device *device
     /* Check if prime_settings is available
      * File doesn't exist or empty
      */
-    if (!exists_not_empty(prime_settings)) {
-        fprintf(log_handle, "Warning: no settings for prime can be found in %s.\n",
-                prime_settings);
+    if (!exists_not_empty(path)) {
+        fprintf(log_handle, "Warning: no settings for prime can be found in %s.\n", path);
 
        /* Try to create the file */
-        if (!create_prime_settings(prime_settings)) {
-            fprintf(log_handle, "Error: failed to create %s\n",
-                    prime_settings);
+        if (!create_prime_settings(path)) {
+            fprintf(log_handle, "Error: failed to create %s\n", path);
             return false;
         }
     }
 
-    prime_mode = get_prime_action();
+    prime_mode = get_prime_action(path);
     if (prime_mode == ON) {
         /* Create an OutputClass just for PRIME, to override
          * the default NVIDIA settings
@@ -1578,6 +1566,7 @@ int main(int argc, char *argv[]) {
     int opt, i;
     char *fake_lspci_file = NULL;
     char *new_boot_file = NULL;
+    char *prime_settings = NULL;
 
     static int fake_offloading = 0;
     static int fake_module_available = 0;
@@ -1755,7 +1744,6 @@ int main(int argc, char *argv[]) {
             case '?':
                 /* getopt_long already printed an error message. */
                 exit(1);
-                break;
 
             default:
                 abort();
@@ -1965,6 +1953,10 @@ int main(int argc, char *argv[]) {
         pci_init = pci_system_init();
         if (pci_init != 0)
             goto end;
+
+        const struct pci_slot_match match = {
+            PCI_MATCH_ANY, PCI_MATCH_ANY, PCI_MATCH_ANY, PCI_MATCH_ANY, 0
+        };
 
         iter = pci_slot_match_iterator_create(&match);
         if (!iter)
