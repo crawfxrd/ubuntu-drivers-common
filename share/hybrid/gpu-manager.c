@@ -151,7 +151,7 @@ static inline void freep(void *p) {
 
 
 static inline void fclosep(FILE **file) {
-    if (*file != NULL && *file >= 0)
+    if (*file != NULL && fileno(*file) >= 0)
         fclose(*file);
 }
 
@@ -404,14 +404,13 @@ static bool find_string_in_file(const char *path, const char *pattern) {
     _cleanup_free_ char *line = NULL;
     _cleanup_fclose_ FILE *file = NULL;
     size_t len = 0;
-    size_t read;
 
     bool found = false;
 
     file = fopen(path, "r");
     if (file == NULL)
          return found;
-    while ((read = getline(&line, &len, file)) != -1) {
+    while (getline(&line, &len, file) != -1) {
         if (istrstr(line, pattern) != NULL) {
             found = true;
             break;
@@ -847,7 +846,7 @@ static bool is_device_pci_passthrough(struct pci_device *info) {
     length = snprintf(sysfs_path, sizeof(sysfs_path),
                       "/sys/bus/pci/devices/%04x:%02x:%02x.%d/driver",
                       info->domain, info->bus, info->dev, info->func);
-    if (length < 0 || length >= sizeof(sysfs_path))
+    if (length < 0 || length >= (ssize_t)sizeof(sysfs_path))
         return false;
 
     length = readlink(sysfs_path, buf, sizeof(buf)-1);
@@ -1362,7 +1361,6 @@ static long get_uid_of_pid(const char *pid) {
     _cleanup_free_ char *line = NULL;
     _cleanup_fclose_ FILE *file = NULL;
     size_t len = 0;
-    size_t read;
     char pattern[] = "Uid:";
     long uid = -1;
 
@@ -1376,7 +1374,7 @@ static long get_uid_of_pid(const char *pid) {
         fprintf(log_handle, "Error: can't open %s\n", path);
         return -1;
     }
-    while ((read = getline(&line, &len, file)) != -1) {
+    while (getline(&line, &len, file) != -1) {
         if (istrstr(line, pattern) != NULL) {
             fprintf(log_handle, "found \"%s\"\n", line);
             if (strncmp(line, "Uid:", 4) == 0) {
@@ -1390,7 +1388,6 @@ static long get_uid_of_pid(const char *pid) {
 
 
 static char* get_user_from_uid(const long uid) {
-    size_t read;
     char *token, *str;
     char pattern[PATH_MAX];
     char *user = NULL;
@@ -1407,7 +1404,7 @@ static char* get_user_from_uid(const long uid) {
     file = fopen("/etc/passwd", "r");
     if (file == NULL)
          return NULL;
-    while ((read = getline(&line, &len, file)) != -1 && (user == NULL)) {
+    while (getline(&line, &len, file) != -1 && (user == NULL)) {
         if (istrstr(line, pattern) != NULL) {
             tofree = str = strdup(line);
             /* Get the first result
@@ -1506,10 +1503,8 @@ static bool kill_main_display_session (void) {
 }
 
 
-static bool enable_prime(const char *prime_settings,
-                        const struct device *device,
-                        struct device **devices,
-                        int cards_n) {
+static bool enable_prime(const char *prime_settings, const struct device *device)
+{
     bool status = false;
     int tries = 0;
     /* Check if prime_settings is available
@@ -2112,8 +2107,7 @@ int main(int argc, char *argv[]) {
                                    &discrete_device);
 
                 /* Try to enable prime */
-                if (enable_prime(prime_settings,
-                                 &discrete_device, current_devices, cards_n)) {
+                if (enable_prime(prime_settings, &discrete_device)) {
 
                     /* Write permanent settings about offloading */
                     set_offloading();
@@ -2172,8 +2166,7 @@ int main(int argc, char *argv[]) {
                 fprintf(log_handle, "Intel hybrid system\n");
 
                 /* Try to enable prime */
-                if (enable_prime(prime_settings,
-                             &discrete_device, current_devices, cards_n)) {
+                if (enable_prime(prime_settings, &discrete_device)) {
 
                     /* Write permanent settings about offloading */
                     set_offloading();
