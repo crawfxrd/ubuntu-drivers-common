@@ -560,24 +560,26 @@ static int get_vars(const char *line, struct device **devices,
                     int num, int desired_matches) {
     int status;
 
-    devices[num] = malloc(sizeof(struct device));
-
-    if (!devices[num])
-        return EOF;
+    struct device *dev = malloc(sizeof(*dev));
+    if (!dev)
+        return -ENOMEM;
 
     status = sscanf(line, "%04x:%04x;%04x:%02x:%02x:%d;%d\n",
-                    &devices[num]->vendor_id,
-                    &devices[num]->device_id,
-                    &devices[num]->domain,
-                    &devices[num]->bus,
-                    &devices[num]->dev,
-                    &devices[num]->func,
-                    &devices[num]->boot_vga);
+                    &dev->vendor_id,
+                    &dev->device_id,
+                    &dev->domain,
+                    &dev->bus,
+                    &dev->dev,
+                    &dev->func,
+                    &dev->boot_vga);
 
     /* Make sure that we match "desired_matches" */
-    if (status == EOF || status != desired_matches)
-        free(devices[num]);
+    if (status == EOF || status != desired_matches) {
+        free(dev);
+        dev = NULL;
+    }
 
+    devices[num] = dev;
     return status;
 }
 
@@ -649,9 +651,9 @@ static void add_gpu_from_file(char *filename, char *dirname, struct device **dev
     /* The number of digits we expect to match in the name */
     int desired_matches = 6;
 
-    devices[*cards_number] = malloc(sizeof(struct device));
-    if (!devices[*cards_number])
-    return;
+    struct device *dev = malloc(sizeof(*dev));
+    if (!dev)
+        return;
 
     /* The name pattern will look like the following:
      * u-d-c-gpu-0000:09:00.0-0x10de-0x1140
@@ -660,34 +662,33 @@ static void add_gpu_from_file(char *filename, char *dirname, struct device **dev
 
     /* Extract the data from the string */
     status = sscanf(filename, path,
-                    &devices[*cards_number]->domain,
-                    &devices[*cards_number]->bus,
-                    &devices[*cards_number]->dev,
-                    &devices[*cards_number]->func,
-                    &devices[*cards_number]->vendor_id,
-                    &devices[*cards_number]->device_id);
+                    &dev->domain,
+                    &dev->bus,
+                    &dev->dev,
+                    &dev->func,
+                    &dev->vendor_id,
+                    &dev->device_id);
 
     /* Check that we actually matched all the desired digits,
      * as per "desired_matches"
      */
     if (status == EOF || status != desired_matches) {
-        free(devices[*cards_number]);
+        free(dev);
         fprintf(log_handle, "no matches, status = %d, expected = %d\n", status, desired_matches);
         return;
     }
 
-    devices[*cards_number]->has_connected_outputs = -1;
+    dev->has_connected_outputs = -1;
 
     fprintf(log_handle, "Adding %04x:%04x in PCI:%02x@%04x:%02x:%d to the list\n",
-            devices[*cards_number]->vendor_id, devices[*cards_number]->device_id,
-            devices[*cards_number]->bus, devices[*cards_number]->domain,
-            devices[*cards_number]->dev, devices[*cards_number]->func);
+            dev->vendor_id, dev->device_id,
+            dev->bus, dev->domain,
+            dev->dev, dev->func);
 
-    /* Increment number of cards */
+    devices[*cards_number] = dev;
     *cards_number += 1;
 
-    fprintf(log_handle, "Successfully detected disabled cards. Total number is %d now\n",
-            *cards_number);
+    fprintf(log_handle, "Successfully detected disabled cards. Total number is %d now\n", *cards_number);
 }
 
 
