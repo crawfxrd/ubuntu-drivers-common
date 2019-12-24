@@ -87,12 +87,6 @@ typedef enum {
 #define MAX_CARDS_N 10
 
 typedef enum {
-    SNA,
-    MODESETTING,
-    UXA
-} prime_intel_drv;
-
-typedef enum {
     MODE_POWERSAVING,
     MODE_PERFORMANCE,
     RESET,
@@ -117,7 +111,6 @@ static char *nvidia_driver_version_path = NULL;
 static char *amdgpu_pro_px_file = NULL;
 static char *modprobe_d_path = NULL;
 static char *xorg_conf_d_path = NULL;
-static prime_intel_drv prime_intel_driver = SNA;
 
 struct device {
     int boot_vga;
@@ -383,26 +376,20 @@ static bool is_disabled_in_cmdline() {
     return has_cmdline_option(KERN_PARAM);
 }
 
-
-static prime_intel_drv get_prime_intel_driver() {
-    prime_intel_drv driver;
+static void report_prime_intel_driver(void)
+{
     if (has_cmdline_option("gpumanager_modesetting")) {
-        driver = MODESETTING;
         fprintf(log_handle, "Detected boot parameter to force the modesetting driver\n");
     }
     else if (has_cmdline_option("gpumanager_uxa")) {
-        driver = UXA;
         fprintf(log_handle, "Detected boot parameter to force Intel/UXA\n");
     }
     else if (has_cmdline_option("gpumanager_sna")) {
-        driver = SNA;
         fprintf(log_handle, "Detected boot parameter to force Intel/SNA\n");
     }
     else {
-        driver = MODESETTING;
+        fprintf(log_handle, "No boot parameter to force Intel: Using modesetting driver\n");
     }
-
-    return driver;
 }
 
 
@@ -1991,8 +1978,7 @@ int main(int argc, char *argv[])
     fprintf(log_handle, "Is nvidia kernel module available? %s\n", (nvidia_kmod_available ? "yes" : "no"));
     fprintf(log_handle, "Is amdgpu kernel module available? %s\n", (amdgpu_kmod_available ? "yes" : "no"));
 
-    /* Get the driver to use for intel in an optimus system */
-    prime_intel_driver = get_prime_intel_driver();
+    report_prime_intel_driver();
 
     if (fake_lspci_file) {
         /* Get the current system data from a file */
