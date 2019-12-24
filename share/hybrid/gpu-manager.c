@@ -65,14 +65,6 @@
 #include <string.h>
 #include <unistd.h>
 
-static inline void freep(void *);
-static inline void fclosep(FILE **);
-static inline void pclosep(FILE **);
-
-#define _cleanup_free_ __attribute__((cleanup(freep)))
-#define _cleanup_fclose_ __attribute__((cleanup(fclosep)))
-#define _cleanup_pclose_ __attribute__((cleanup(pclosep)))
-
 static const char *LAST_BOOT = "/var/lib/ubuntu-drivers-common/last_gfx_boot";
 static const char *OFFLOADING_CONF = "/var/lib/ubuntu-drivers-common/requires_offloading";
 static const char *KERN_PARAM = "nogpumanager";
@@ -124,26 +116,25 @@ struct device {
 };
 
 
-static bool is_file(char *file);
-static bool is_link(char *file);
-static bool is_module_loaded(const char *module);
-
-static inline void freep(void *p) {
-    free(*(void**) p);
+static inline void freep(void *p)
+{
+    free(*(void **)p);
 }
+#define _cleanup_free_ __attribute__((cleanup(freep)))
 
-
-static inline void fclosep(FILE **file) {
+static inline void fclosep(FILE **file)
+{
     if (*file != NULL && fileno(*file) >= 0)
         fclose(*file);
 }
+#define _cleanup_fclose_ __attribute__((cleanup(fclosep)))
 
-
-static inline void pclosep(FILE **file) {
+static inline void pclosep(FILE **file)
+{
     if (*file != NULL)
         pclose(*file);
 }
-
+#define _cleanup_pclose_ __attribute__((cleanup(pclosep)))
 
 static bool starts_with(const char *string, const char *prefix) {
     size_t prefix_len = strlen(prefix);
@@ -230,22 +221,19 @@ static bool act_upon_module_with_params(const char *module,
     return (status == 0);
 }
 
-/* Load a kernel module and pass it parameters */
-static bool load_module_with_params(const char *module,
-                                   char *params) {
-    return (act_upon_module_with_params(module, 1, params));
+static bool load_module_with_params(const char *module, char *params)
+{
+    return act_upon_module_with_params(module, 1, params);
 }
 
-
-/* Load a kernel module */
-static bool load_module(const char *module) {
-    return (load_module_with_params(module, NULL));
+static bool load_module(const char *module)
+{
+    return load_module_with_params(module, NULL);
 }
 
-
-/* Unload a kernel module */
-static bool unload_module(const char *module) {
-    return (act_upon_module_with_params(module, 0, NULL));
+static bool unload_module(const char *module)
+{
+    return act_upon_module_with_params(module, 0, NULL);
 }
 
 
@@ -327,6 +315,48 @@ static bool is_module_blacklisted(const char* module) {
     return true;
 }
 
+
+static bool is_module_loaded(const char *module)
+{
+    bool status = false;
+    char line[4096];
+    _cleanup_fclose_ FILE *file = NULL;
+
+    if (!fake_modules_path)
+        file = fopen("/proc/modules", "r");
+    else
+        file = fopen(fake_modules_path, "r");
+
+    if (!file) {
+        fprintf(log_handle, "Error: can't open /proc/modules");
+        return false;
+    }
+
+    while (fgets(line, sizeof(line), file)) {
+        char *tok;
+        tok = strtok(line, " \t");
+        if (strcmp(tok, module) == 0) {
+            status = true;
+            break;
+        }
+    }
+
+    return status;
+}
+
+static bool is_file(char *file)
+{
+    struct stat stbuf;
+
+    if (stat(file, &stbuf) == -1) {
+        fprintf(log_handle, "can't access %s file\n", file);
+        return false;
+    }
+    if (stbuf.st_mode & S_IFMT)
+        return true;
+
+    return false;
+}
 
 /* Look for unloaded modules */
 static bool has_unloaded_module(char *module) {
@@ -709,49 +739,8 @@ static bool is_module_available(const char *module)
 }
 
 
-static bool is_module_loaded(const char *module) {
-    bool status = false;
-    char line[4096];
-    _cleanup_fclose_ FILE *file = NULL;
-
-    if (!fake_modules_path)
-        file = fopen("/proc/modules", "r");
-    else
-        file = fopen(fake_modules_path, "r");
-
-    if (!file) {
-        fprintf(log_handle, "Error: can't open /proc/modules");
-        return false;
-    }
-
-    while (fgets(line, sizeof(line), file)) {
-        char *tok;
-        tok = strtok(line, " \t");
-        if (strcmp(tok, module) == 0) {
-            status = true;
-            break;
-        }
-    }
-
-    return status;
-}
-
-
-static bool is_file(char *file) {
-    struct stat stbuf;
-
-    if (stat(file, &stbuf) == -1) {
-        fprintf(log_handle, "can't access %s file\n", file);
-        return false;
-    }
-    if (stbuf.st_mode & S_IFMT)
-        return true;
-
-    return false;
-}
-
-
-static bool is_link(char *file) {
+static bool is_link(char *file)
+{
     struct stat stbuf;
 
     if (lstat(file, &stbuf) == -1) {
