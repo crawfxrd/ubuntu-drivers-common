@@ -92,7 +92,6 @@ typedef enum {
 static char *log_file = NULL;
 static FILE *log_handle = NULL;
 static char *last_boot_file = NULL;
-static int dry_run = 0;
 static char *fake_modules_path = NULL;
 static char *gpu_detection_path = NULL;
 static char *dmi_product_name_path = NULL;
@@ -100,6 +99,15 @@ static char *dmi_product_version_path = NULL;
 static char *amdgpu_pro_px_file = NULL;
 static char *modprobe_d_path = NULL;
 static char *xorg_conf_d_path = NULL;
+static char *fake_lspci_file = NULL;
+static char *new_boot_file = NULL;
+static char *prime_settings = NULL;
+
+static int dry_run = 0;
+static int fake_offloading = 0;
+static int fake_module_available = 0;
+static int fake_module_versioned = 0;
+static int backup_log = 0;
 
 struct device {
     int boot_vga;
@@ -1586,44 +1594,9 @@ out:
     return ret;
 }
 
-int main(int argc, char *argv[])
+static int parse_cmd_line(int argc, char *argv[])
 {
-    int opt;
-    char *fake_lspci_file = NULL;
-    char *new_boot_file = NULL;
-    char *prime_settings = NULL;
-
-    static int fake_offloading = 0;
-    static int fake_module_available = 0;
-    static int fake_module_versioned = 0;
-    static int backup_log = 0;
-
-    bool has_changed = false;
-    bool nvidia_loaded = false,
-         intel_loaded = false, radeon_loaded = false,
-         amdgpu_loaded = false, nouveau_loaded = false;
-    bool nvidia_unloaded = false;
-    bool nvidia_blacklisted = false,
-         radeon_blacklisted = false, amdgpu_blacklisted = false,
-         nouveau_blacklisted = false;
-    bool nvidia_kmod_available = false,
-         amdgpu_kmod_available = false;
-    bool amdgpu_versioned = false;
-    bool amdgpu_pro_px_installed = false;
-    bool amdgpu_is_pro = false;
-    int offloading = false;
-    int status = 0;
-
-    struct device *boot_device = NULL;
-    struct device *discrete_device = NULL;
-
-    /* Store the devices here */
-    struct gpus current_devices = {0};
-    struct gpus old_devices = {0};
-
-    while (1) {
-        static struct option long_options[] =
-        {
+    static struct option long_options[] = {
         /* These options set a flag. */
         {"backup-log", no_argument, &backup_log, 1},
         {"dry-run", no_argument, &dry_run, 1},
@@ -1646,15 +1619,13 @@ int main(int argc, char *argv[])
         {"gpu-detection-path", required_argument, 0, 's'},
         {"amdgpu-pro-px-file", required_argument, 0, 'w'},
         {"prime-settings", required_argument, 0, 'z'},
-        {0, 0, 0, 0}
-        };
-        /* getopt_long stores the option index here. */
+        {0, 0, 0, 0},
+    };
+
+    while (true) {
         int option_index = 0;
+        int opt = getopt_long(argc, argv, "a:b:f:h:i:k:l:m:n:s:w:z:", long_options, &option_index);
 
-        opt = getopt_long (argc, argv, "a:b:f:h:i:k:l:m:n:s:w:z:",
-                        long_options, &option_index);
-
-        /* Detect the end of the options. */
         if (opt == -1)
             break;
 
@@ -1770,10 +1741,6 @@ int main(int argc, char *argv[])
         }
 
     }
-    /*
-    if (dry_run)
-        printf("dry-run flag is set\n");
-    */
 
     /* Send messages to the log or to stdout */
     if (log_file) {
@@ -1795,9 +1762,8 @@ int main(int argc, char *argv[])
     }
 
     if (is_disabled_in_cmdline()) {
-        fprintf(log_handle, "Disabled by kernel parameter \"%s\"\n",
-                KERN_PARAM);
-        goto end;
+        fprintf(log_handle, "Disabled by kernel parameter \"%s\"\n", KERN_PARAM);
+        return -EPERM;
     }
 
 
@@ -1813,7 +1779,7 @@ int main(int argc, char *argv[])
         fprintf(log_handle, "last_boot_file: %s\n", last_boot_file);
     else {
         fprintf(log_handle, "No last_boot_file!\n");
-        goto end;
+        return -EINVAL;
     }
 
     if (!new_boot_file)
@@ -1832,7 +1798,7 @@ int main(int argc, char *argv[])
         prime_settings = strdup("/etc/prime-discrete");
         if (!prime_settings) {
             fprintf(log_handle, "Couldn't allocate prime_settings\n");
-            goto end;
+            return -ENOMEM;
         }
     }
 
@@ -1842,7 +1808,7 @@ int main(int argc, char *argv[])
         dmi_product_name_path = strdup("/sys/class/dmi/id/product_name");
         if (!dmi_product_name_path) {
             fprintf(log_handle, "Couldn't allocate dmi_product_name_path\n");
-            goto end;
+            return -ENOMEM;
         }
     }
 
@@ -1852,7 +1818,7 @@ int main(int argc, char *argv[])
         dmi_product_version_path = strdup("/sys/class/dmi/id/product_version");
         if (!dmi_product_version_path) {
             fprintf(log_handle, "Couldn't allocate dmi_product_version_path\n");
-            goto end;
+            return -ENOMEM;
         }
     }
 
@@ -1862,7 +1828,7 @@ int main(int argc, char *argv[])
         amdgpu_pro_px_file = strdup(AMDGPU_PRO_PX);
         if (!amdgpu_pro_px_file) {
             fprintf(log_handle, "Couldn't allocate amdgpu_pro_px_file\n");
-            goto end;
+            return -ENOMEM;
         }
     }
 
@@ -1872,7 +1838,7 @@ int main(int argc, char *argv[])
         modprobe_d_path = strdup("/etc/modprobe.d");
         if (!modprobe_d_path) {
             fprintf(log_handle, "Couldn't allocate modprobe_d_path\n");
-            goto end;
+            return -ENOMEM;
         }
     }
 
@@ -1882,12 +1848,46 @@ int main(int argc, char *argv[])
         xorg_conf_d_path = strdup("/usr/share/X11/xorg.conf.d");
         if (!xorg_conf_d_path) {
             fprintf(log_handle, "Couldn't allocate xorg_conf_d_path\n");
-            goto end;
+            return -ENOMEM;
         }
     }
 
     if (fake_modules_path)
         fprintf(log_handle, "fake_modules_path file: %s\n", fake_modules_path);
+
+    return 0;
+}
+
+int main(int argc, char *argv[])
+{
+    bool has_changed = false;
+    bool nvidia_loaded = false;
+    bool intel_loaded = false;
+    bool radeon_loaded = false;
+    bool amdgpu_loaded = false;
+    bool nouveau_loaded = false;
+    bool nvidia_unloaded = false;
+    bool nvidia_blacklisted = false;
+    bool radeon_blacklisted = false;
+    bool amdgpu_blacklisted = false;
+    bool nouveau_blacklisted = false;
+    bool nvidia_kmod_available = false;
+    bool amdgpu_kmod_available = false;
+    bool amdgpu_versioned = false;
+    bool amdgpu_pro_px_installed = false;
+    bool amdgpu_is_pro = false;
+    int offloading = false;
+    int status = 0;
+
+    struct device *boot_device = NULL;
+    struct device *discrete_device = NULL;
+
+    /* Store the devices here */
+    struct gpus current_devices = {0};
+    struct gpus old_devices = {0};
+
+    if (parse_cmd_line(argc, argv) != 0)
+        goto end;
 
     nvidia_loaded = is_module_loaded("nvidia");
     nvidia_unloaded = nvidia_loaded ? false : has_unloaded_module("nvidia");
@@ -1901,7 +1901,6 @@ int main(int argc, char *argv[])
     amdgpu_pro_px_installed = exists_not_empty(amdgpu_pro_px_file);
     nouveau_loaded = is_module_loaded("nouveau");
     nouveau_blacklisted = is_module_blacklisted("nouveau");
-
 
     if (fake_lspci_file) {
         nvidia_kmod_available = fake_module_available;
@@ -2086,9 +2085,6 @@ int main(int argc, char *argv[])
                 fprintf(log_handle, "Nothing to do\n");
         }
     }
-
-
-
 
 end:
     if (log_file)
