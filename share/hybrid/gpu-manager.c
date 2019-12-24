@@ -78,9 +78,11 @@ static const char *OFFLOADING_CONF = "/var/lib/ubuntu-drivers-common/requires_of
 static const char *KERN_PARAM = "nogpumanager";
 static const char *AMDGPU_PRO_PX = "/opt/amdgpu-pro/bin/amdgpu-pro-px";
 
-#define AMD 0x1002
-#define INTEL 0x8086
-#define NVIDIA 0x10de
+typedef enum {
+    AMD = 0x1002,
+    INTEL = 0x8086,
+    NVIDIA = 0x10DE,
+} vendor;
 
 #define MAX_CARDS_N 10
 
@@ -119,7 +121,7 @@ static prime_intel_drv prime_intel_driver = SNA;
 
 struct device {
     int boot_vga;
-    unsigned int vendor_id;
+    vendor vendor_id;
     unsigned int device_id;
     /* BusID components */
     unsigned int domain;
@@ -205,45 +207,6 @@ static bool exists_not_empty(const char *file) {
     }
     return true;
 }
-
-#if 0
-/* Get reference count from module */
-static int get_module_refcount(const char* module) {
-    _cleanup_fclose_ FILE *file = NULL;
-    _cleanup_free_ char *line = NULL;
-    size_t len = 0;
-    char refcount_path[50];
-    int refcount = 0;
-    int status = 0;
-
-    snprintf(refcount_path, sizeof(refcount_path), "/sys/module/%s/refcnt", module);
-
-    if (!exists_not_empty(refcount_path)) {
-        fprintf(log_handle, "Error: %s does not exist or is empty.\n", refcount_path);
-        return 0;
-    }
-
-    /* get dmi product version */
-    file = fopen(refcount_path, "r");
-    if (file == NULL) {
-        fprintf(log_handle, "can't open %s\n", refcount_path);
-        return 0;
-    }
-    if (getline(&line, &len, file) == -1) {
-        fprintf(log_handle, "can't get line from %s\n", refcount_path);
-        return 0;
-    }
-
-    status = sscanf(line, "%d\n", &refcount);
-
-    /* Make sure that we match 1 time */
-    if (status == EOF || status != 1)
-        refcount = 0;
-
-    return refcount;
-}
-#endif
-
 
 static bool act_upon_module_with_params(const char *module,
                                        int mode,
