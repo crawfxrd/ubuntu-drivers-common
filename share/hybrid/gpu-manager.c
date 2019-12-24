@@ -107,7 +107,6 @@ static char *fake_modules_path = NULL;
 static char *gpu_detection_path = NULL;
 static char *dmi_product_name_path = NULL;
 static char *dmi_product_version_path = NULL;
-static char *nvidia_driver_version_path = NULL;
 static char *amdgpu_pro_px_file = NULL;
 static char *modprobe_d_path = NULL;
 static char *xorg_conf_d_path = NULL;
@@ -1670,7 +1669,6 @@ int main(int argc, char *argv[])
         {"fake-lspci", required_argument, 0, 'f'},
         {"dmi-product-version-path", required_argument, 0, 'h'},
         {"dmi-product-name-path", required_argument, 0, 'i'},
-        {"nvidia-driver-version-path", required_argument, 0, 'j'},
         {"modprobe-d-path", required_argument, 0, 'k'},
         {"log", required_argument, 0, 'l'},
         {"fake-modules-path", required_argument, 0, 'm'},
@@ -1683,7 +1681,7 @@ int main(int argc, char *argv[])
         /* getopt_long stores the option index here. */
         int option_index = 0;
 
-        opt = getopt_long (argc, argv, "a:b:f:h:i:j:k:l:m:n:s:w:z:",
+        opt = getopt_long (argc, argv, "a:b:f:h:i:k:l:m:n:s:w:z:",
                         long_options, &option_index);
 
         /* Detect the end of the options. */
@@ -1735,12 +1733,6 @@ int main(int argc, char *argv[])
             /* printf("option -p with value '%s'\n", optarg); */
             dmi_product_name_path = strdup(optarg);
             if (!dmi_product_name_path)
-                abort();
-            break;
-
-        case 'j':
-            nvidia_driver_version_path = strdup(optarg);
-            if (!nvidia_driver_version_path)
                 abort();
             break;
 
@@ -1890,16 +1882,6 @@ int main(int argc, char *argv[])
         dmi_product_version_path = strdup("/sys/class/dmi/id/product_version");
         if (!dmi_product_version_path) {
             fprintf(log_handle, "Couldn't allocate dmi_product_version_path\n");
-            goto end;
-        }
-    }
-
-    if (nvidia_driver_version_path)
-        fprintf(log_handle, "nvidia_driver_version_path file: %s\n", nvidia_driver_version_path);
-    else {
-        nvidia_driver_version_path = strdup("/sys/module/nvidia/version");
-        if (!nvidia_driver_version_path) {
-            fprintf(log_handle, "Couldn't allocate nvidia_driver_version_path\n");
             goto end;
         }
     }
@@ -2174,9 +2156,6 @@ end:
 
     if (dmi_product_version_path)
         free(dmi_product_version_path);
-
-    if (nvidia_driver_version_path)
-        free(nvidia_driver_version_path);
 
     if (modprobe_d_path)
         free(modprobe_d_path);
