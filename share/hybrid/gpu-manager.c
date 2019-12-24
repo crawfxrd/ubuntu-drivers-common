@@ -73,10 +73,10 @@ static inline void pclosep(FILE **);
 #define _cleanup_fclose_ __attribute__((cleanup(fclosep)))
 #define _cleanup_pclose_ __attribute__((cleanup(pclosep)))
 
-#define LAST_BOOT "/var/lib/ubuntu-drivers-common/last_gfx_boot"
-#define OFFLOADING_CONF "/var/lib/ubuntu-drivers-common/requires_offloading"
-#define KERN_PARAM "nogpumanager"
-#define AMDGPU_PRO_PX  "/opt/amdgpu-pro/bin/amdgpu-pro-px"
+static const char *LAST_BOOT = "/var/lib/ubuntu-drivers-common/last_gfx_boot";
+static const char *OFFLOADING_CONF = "/var/lib/ubuntu-drivers-common/requires_offloading";
+static const char *KERN_PARAM = "nogpumanager";
+static const char *AMDGPU_PRO_PX = "/opt/amdgpu-pro/bin/amdgpu-pro-px";
 
 #define AMD 0x1002
 #define INTEL 0x8086
