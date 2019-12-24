@@ -76,8 +76,6 @@ typedef enum {
     NVIDIA = 0x10DE,
 } vendor;
 
-#define MAX_CARDS_N 10
-
 typedef enum {
     MODE_POWERSAVING,
     MODE_PERFORMANCE,
@@ -113,6 +111,13 @@ struct device {
     unsigned int dev;
     unsigned int func;
     int has_connected_outputs;
+};
+
+#define MAX_NR_CARDS 10
+
+struct gpus {
+    struct device *cards[MAX_NR_CARDS];
+    int nr_cards;
 };
 
 
@@ -454,89 +459,77 @@ static prime_mode_settings get_prime_action(const char *path)
     return mode;
 }
 
-static struct device *get_boot_vga(struct device **devices, int cards_number)
+static struct device *get_boot_vga(struct gpus *gpus)
 {
-    for (int i = 0; i < cards_number; i++) {
-        if (devices[i]->boot_vga) {
-            return devices[i];
+    for (int i = 0; i < gpus->nr_cards; i++) {
+        if (gpus->cards[i]->boot_vga) {
+            return gpus->cards[i];
         }
     }
 
     return NULL;
 }
 
-
-static struct device *get_first_discrete(struct device **devices, int cards_number)
+static struct device *get_first_discrete(struct gpus *gpus)
 {
-    for (int i = 0; i < cards_number; i++) {
-        if (!devices[i]->boot_vga) {
-            return devices[i];
+    for (int i = 0; i < gpus->nr_cards; i++) {
+        if (!gpus->cards[i]->boot_vga) {
+            return gpus->cards[i];
         }
     }
 
     return NULL;
 }
 
-
-static bool has_system_changed(struct device **old_devices,
-                       struct device **new_devices,
-                       int old_number,
-                       int new_number) {
-
-    bool status = false;
-    int i;
-    if (old_number != new_number) {
+static bool has_system_changed(struct gpus *prev, struct gpus *current)
+{
+    if (prev->nr_cards != current->nr_cards) {
         fprintf(log_handle, "The number of cards has changed!\n");
-        return 1;
+        return true;
     }
 
-    for (i = 0; i < old_number; i++) {
-        if ((old_devices[i]->boot_vga != new_devices[i]->boot_vga) ||
-            (old_devices[i]->vendor_id != new_devices[i]->vendor_id) ||
-            (old_devices[i]->device_id != new_devices[i]->device_id) ||
-            (old_devices[i]->domain != new_devices[i]->domain) ||
-            (old_devices[i]->bus != new_devices[i]->bus) ||
-            (old_devices[i]->dev != new_devices[i]->dev) ||
-            (old_devices[i]->func != new_devices[i]->func)) {
-            status = true;
-            break;
+    for (int i = 0; i < prev->nr_cards; i++) {
+        if ((prev->cards[i]->boot_vga != current->cards[i]->boot_vga) ||
+            (prev->cards[i]->vendor_id != current->cards[i]->vendor_id) ||
+            (prev->cards[i]->device_id != current->cards[i]->device_id) ||
+            (prev->cards[i]->domain != current->cards[i]->domain) ||
+            (prev->cards[i]->bus != current->cards[i]->bus) ||
+            (prev->cards[i]->dev != current->cards[i]->dev) ||
+            (prev->cards[i]->func != current->cards[i]->func)) {
+            return true;
         }
     }
 
-    return status;
+    return false;
 }
 
 
-static bool write_data_to_file(struct device **devices,
-                              int cards_number,
-                              char *filename) {
-    int i;
+static bool write_data_to_file(const char *filename, struct gpus *gpus)
+{
     _cleanup_fclose_ FILE *file = NULL;
     file = fopen(filename, "w");
-    if (file == NULL) {
-        fprintf(log_handle, "I couldn't open %s for writing.\n",
-                filename);
+    if (!file) {
+        fprintf(log_handle, "I couldn't open %s for writing.\n", filename);
         return false;
     }
 
-    for(i = 0; i < cards_number; i++) {
+    for (int i = 0; i < gpus->nr_cards; i++) {
         fprintf(file, "%04x:%04x;%04x:%02x:%02x:%d;%d\n",
-                devices[i]->vendor_id,
-                devices[i]->device_id,
-                devices[i]->domain,
-                devices[i]->bus,
-                devices[i]->dev,
-                devices[i]->func,
-                devices[i]->boot_vga);
+                gpus->cards[i]->vendor_id,
+                gpus->cards[i]->device_id,
+                gpus->cards[i]->domain,
+                gpus->cards[i]->bus,
+                gpus->cards[i]->dev,
+                gpus->cards[i]->func,
+                gpus->cards[i]->boot_vga);
     }
-    fflush(file);
 
     return true;
 }
 
 
-static int get_vars(const char *line, struct device **devices,
-                    int num, int desired_matches) {
+static int get_vars(const char *line, struct gpus *gpus, int desired_matches)
+{
     int status;
 
     struct device *dev = malloc(sizeof(*dev));
@@ -558,7 +551,7 @@ static int get_vars(const char *line, struct device **devices,
         dev = NULL;
     }
 
-    devices[num] = dev;
+    gpus->cards[gpus->nr_cards] = dev;
     return status;
 }
 
@@ -566,10 +559,8 @@ static int get_vars(const char *line, struct device **devices,
 /* Return 0 if it failed, 1 if it succeeded,
  * 2 if it created the file for the first time
  */
-static int read_data_from_file(struct device **devices,
-                               int *cards_number,
-                               char *filename) {
-    /* Read from last boot gfx */
+static int read_data_from_file(const char *filename, struct gpus *gpus)
+{
     char line[100];
     _cleanup_fclose_ FILE *file = NULL;
     /* The number of digits we expect to match per line */
@@ -602,13 +593,13 @@ static int read_data_from_file(struct device **devices,
     }
     else {
         /* Use fgets so as to limit the buffer length */
-        while (fgets(line, sizeof(line), file) && (*cards_number < MAX_CARDS_N)) {
+        while (fgets(line, sizeof(line), file) && (gpus->nr_cards < MAX_NR_CARDS)) {
             if (strlen(line) > 0) {
                 /* See if we actually get all the desired digits,
                  * as per "desired_matches"
                  */
-                if (get_vars(line, devices, *cards_number, desired_matches) == desired_matches) {
-                    *cards_number += 1;
+                if (get_vars(line, gpus, desired_matches) == desired_matches) {
+                    gpus->nr_cards += 1;
                 }
             }
         }
@@ -618,8 +609,7 @@ static int read_data_from_file(struct device **devices,
 }
 
 
-static void add_gpu_from_file(char *filename, char *dirname, struct device **devices,
-                              int *cards_number)
+static void add_gpu_from_file(char *filename, char *dirname, struct gpus *gpus)
 {
     int status = EOF;
     char path[PATH_MAX];
@@ -664,17 +654,16 @@ static void add_gpu_from_file(char *filename, char *dirname, struct device **dev
             dev->bus, dev->domain,
             dev->dev, dev->func);
 
-    devices[*cards_number] = dev;
-    *cards_number += 1;
+    gpus->cards[gpus->nr_cards] = dev;
+    gpus->nr_cards += 1;
 
-    fprintf(log_handle, "Successfully detected disabled cards. Total number is %d now\n", *cards_number);
+    fprintf(log_handle, "Successfully detected disabled cards. Total number is %d now\n", gpus->nr_cards);
 }
 
 
 /* Look for clues of disabled cards in the directory */
-static void find_disabled_cards(char *dir, struct device **devices,
-                         int *cards_n, void (*fcn)(char *, char *,
-                         struct device **, int *))
+static void find_disabled_cards(char *dir, struct gpus *gpus,
+                                void (*fcn)(char *, char *, struct gpus *))
 {
     char name[PATH_MAX];
     struct dirent *dp;
@@ -695,7 +684,7 @@ static void find_disabled_cards(char *dir, struct device **devices,
                     dir, dp->d_name);
         else {
             sprintf(name, "%s/%s", dir, dp->d_name);
-            (*fcn)(name, dir, devices, cards_n);
+            (*fcn)(name, dir, gpus);
         }
     }
     closedir(dfd);
@@ -933,14 +922,14 @@ static int has_driver_connected_outputs(const char *driver) {
  * By default we only check cards driver by i915.
  * If so, then claim support for RandR offloading
  */
-static bool requires_offloading(struct device **devices, int cards_n)
+static bool requires_offloading(struct gpus *gpus)
 {
     /* Let's check only /dev/dri/card0 and look
      * for driver i915. We don't want to enable
      * offloading to any other driver, as results
      * may be unpredictable
      */
-    const struct device *dev = get_boot_vga(devices, cards_n);
+    const struct device *dev = get_boot_vga(gpus);
     return dev && dev->has_connected_outputs == 1 && dev->vendor_id == INTEL;
 }
 
@@ -1470,14 +1459,16 @@ unload_again:
     return true;
 }
 
-static void free_devices(struct device **devices)
+static void free_devices(struct gpus *gpus)
 {
-    for (int i = 0; i < MAX_CARDS_N; i++) {
-        if (devices[i]) {
-            free(devices[i]);
-            devices[i] = NULL;
+    for (int i = 0; i < MAX_NR_CARDS; i++) {
+        if (gpus->cards[i]) {
+            free(gpus->cards[i]);
+            gpus->cards[i] = NULL;
         }
     }
+
+    gpus->nr_cards = 0;
 }
 
 #define PCI_CLASS_DISPLAY       0x03
@@ -1487,12 +1478,11 @@ static inline bool is_display_controller(const struct pci_device *pci)
     return ((pci->device_class >> 16) & 0xFF) == PCI_CLASS_DISPLAY;
 }
 
-static int get_current_devices(struct device **devices, int *cards_n)
+static int get_current_devices(struct gpus *gpus)
 {
     struct pci_device *info;
     struct pci_device_iterator *iter;
     int ret;
-    int nr_cards = 0;
     bool has_amd = false;
     bool has_intel = false;
     bool has_nvidia = false;
@@ -1537,11 +1527,11 @@ static int get_current_devices(struct device **devices, int *cards_n)
                 continue;
             }
 
-            /* We don't support more than MAX_CARDS_N */
-            if (nr_cards >= MAX_CARDS_N) {
+            /* We don't support more than MAX_NR_CARDS */
+            if (gpus->nr_cards >= MAX_NR_CARDS) {
                 fprintf(log_handle, "Warning: too many devices. "
                                     "Max supported %d. Ignoring the rest.\n",
-                                    MAX_CARDS_N);
+                                    MAX_NR_CARDS);
                 break;
             }
 
@@ -1576,26 +1566,23 @@ static int get_current_devices(struct device **devices, int *cards_n)
                 dev->has_connected_outputs = -1;
             }
 
-            devices[nr_cards] = dev;
-            nr_cards += 1;
+            gpus->cards[gpus->nr_cards] = dev;
+            gpus->nr_cards += 1;
         }
     }
 
-    fprintf(log_handle, "Cards detected: %d\n", nr_cards);
+    fprintf(log_handle, "Cards detected: %d\n", gpus->nr_cards);
     fprintf(log_handle, "  AMD: %s\n", (has_amd ? "yes" : "no"));
     fprintf(log_handle, "  Intel: %s\n", (has_intel ? "yes" : "no"));
     fprintf(log_handle, "  NVIDIA: %s\n", (has_nvidia ? "yes" : "no"));
 
 out:
-    if (ret != 0) {
-        free_devices(devices);
-        nr_cards = 0;
-    }
+    if (ret != 0)
+        free_devices(gpus);
 
     free(iter);
     pci_system_cleanup();
 
-    *cards_n = nr_cards;
     return ret;
 }
 
@@ -1630,15 +1617,9 @@ int main(int argc, char *argv[])
     struct device *boot_device = NULL;
     struct device *discrete_device = NULL;
 
-    /* The current number of cards */
-    int cards_n = 0;
-
-    /* The number of cards from last boot*/
-    int last_cards_n = 0;
-
     /* Store the devices here */
-    struct device *current_devices[MAX_CARDS_N];
-    struct device *old_devices[MAX_CARDS_N];
+    struct gpus current_devices = {0};
+    struct gpus old_devices = {0};
 
     while (1) {
         static struct option long_options[] =
@@ -1953,25 +1934,25 @@ int main(int argc, char *argv[])
 
     if (fake_lspci_file) {
         /* Get the current system data from a file */
-        status = read_data_from_file(current_devices, &cards_n, fake_lspci_file);
+        status = read_data_from_file(fake_lspci_file, &current_devices);
         if (!status) {
             fprintf(log_handle, "Error: can't read %s\n", fake_lspci_file);
             goto end;
         }
         /* Set data in the devices structs */
-        for (int i = 0; i < cards_n; i++) {
+        for (int i = 0; i < current_devices.nr_cards; i++) {
             /* Set unavailable fake outputs */
-            current_devices[i]->has_connected_outputs = -1;
+            current_devices.cards[i]->has_connected_outputs = -1;
         }
         /* Set fake offloading */
         offloading = fake_offloading;
     }
     else {
-        if (get_current_devices(current_devices, &cards_n) != 0)
+        if (get_current_devices(&current_devices) != 0)
             goto end;
 
         /* See if it requires RandR offloading */
-        offloading = requires_offloading(current_devices, cards_n);
+        offloading = requires_offloading(&current_devices);
     }
 
     fprintf(log_handle, "Does it require offloading? %s\n", (offloading ? "yes" : "no"));
@@ -1983,42 +1964,36 @@ int main(int argc, char *argv[])
         unlink(OFFLOADING_CONF);
 
     /* Read the data from last boot */
-    status = read_data_from_file(old_devices, &last_cards_n,
-                                 last_boot_file);
+    status = read_data_from_file(last_boot_file, &old_devices);
     if (!status) {
         fprintf(log_handle, "Can't read %s\n", last_boot_file);
         goto end;
     }
 
-    fprintf(log_handle, "last cards number = %d\n", last_cards_n);
+    fprintf(log_handle, "last cards number = %d\n", old_devices.nr_cards);
 
     /* Write the current data */
-    status = write_data_to_file(current_devices,
-                                cards_n,
-                                new_boot_file);
+    status = write_data_to_file(new_boot_file, &current_devices);
     if (!status) {
         fprintf(log_handle, "Error: can't write to %s\n", last_boot_file);
         goto end;
     }
 
     /* See if the system has changed */
-    has_changed = has_system_changed(old_devices,
-                                     current_devices,
-                                     last_cards_n,
-                                     cards_n);
+    has_changed = has_system_changed(&old_devices, &current_devices);
     fprintf(log_handle, "Has the system changed? %s\n", has_changed ? "Yes" : "No");
 
     if (has_changed)
         fprintf(log_handle, "System configuration has changed\n");
 
     /* Get data about the boot_vga card */
-    boot_device = get_boot_vga(current_devices, cards_n);
+    boot_device = get_boot_vga(&current_devices);
     if (!boot_device) {
         fprintf(log_handle, "No boot display controller detected\n");
         goto end;
     }
 
-    if (cards_n == 1) {
+    if (current_devices.nr_cards == 1) {
         fprintf(log_handle, "Single card detected\n");
 
         if (boot_device->vendor_id == INTEL) {
@@ -2027,11 +2002,9 @@ int main(int argc, char *argv[])
                 fprintf(log_handle, "PRIME detected\n");
 
                 /* Get the details of the disabled discrete from a file */
-                find_disabled_cards(gpu_detection_path, current_devices,
-                                    &cards_n, add_gpu_from_file);
+                find_disabled_cards(gpu_detection_path, &current_devices, add_gpu_from_file);
 
-                /* Get data about the first discrete card */
-                discrete_device = get_first_discrete(current_devices, cards_n);
+                discrete_device = get_first_discrete(&current_devices);
                 if (!discrete_device)
                     goto end;
 
@@ -2067,9 +2040,8 @@ int main(int argc, char *argv[])
             }
         }
     }
-    else if (cards_n > 1) {
-        /* Get data about the first discrete card */
-        discrete_device = get_first_discrete(current_devices, cards_n);
+    else if (current_devices.nr_cards > 1) {
+        discrete_device = get_first_discrete(&current_devices);
         if (!discrete_device)
             goto end;
 
@@ -2152,8 +2124,8 @@ end:
     if (xorg_conf_d_path)
         free(xorg_conf_d_path);
 
-    free_devices(current_devices);
-    free_devices(old_devices);
+    free_devices(&current_devices);
+    free_devices(&old_devices);
 
     /* Flush and close the log */
     if (log_handle != stdout) {
